@@ -1,7 +1,0 @@
-{
-  "_comment" : "config for all log, it can be modified online, value: LOG, DEBUG",
-  "METRIC Manager": "LOG",
-  "Thread Pool": "LOG",
-  "Pusher": "LOG",
-  "JSONCONFIG": "LOG"
-}

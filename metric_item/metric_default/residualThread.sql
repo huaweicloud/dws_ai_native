@@ -1,1 +1,0 @@
-select query_id,count(*) from pgxc_thread_wait_status b where not exists (select query_id from  pgxc_thread_wait_status a where a.node_name like 'c%' and a.query_id=b.query_id) and b.node_name like 'd%' and b.wait_status not in ('none','wait cmd') and b.tid <> pg_backend_pid() group by 1 limit 20;

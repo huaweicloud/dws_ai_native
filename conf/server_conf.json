@@ -1,9 +1,0 @@
-{
-"_comment" : "config for data import",
-  "interval" : 5,
-  "metric_database": "gsmetric",
-  "data_root_path": "/srv/BigData/mppdb/data1/metricbase/metricdata/",
-  "max_deal_package": 300,
-  "data_age" : 90,
-  "max_error_files" : 3000
-}

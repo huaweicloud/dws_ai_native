@@ -161,6 +161,32 @@ if _has_plaintext_secrets(_cfg):
 
 _cfg = _try_decrypt_fields(_cfg)
 
+_PROXY_USERNAME = _cfg.get("proxy_username", "")
+_PROXY_PASSWORD = _cfg.get("proxy_password", "")
+
+
+def _build_proxy_url(base_url: str) -> str:
+    """Inject proxy_username:proxy_password into base_url with proper percent-encoding."""
+    if not base_url:
+        return ""
+    if not _PROXY_USERNAME:
+        return base_url
+    from urllib.parse import urlparse, quote, urlunparse
+
+    parsed = urlparse(base_url)
+    encoded_auth = f"{quote(_PROXY_USERNAME, safe='')}:{quote(_PROXY_PASSWORD, safe='')}"
+    netloc = f"{encoded_auth}@{parsed.hostname}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
+
+
+_HTTP_PROXY_BASE = _cfg.get("http_proxy", "")
+_HTTPS_PROXY_BASE = _cfg.get("https_proxy", "")
+
+HTTP_PROXY = _build_proxy_url(_HTTP_PROXY_BASE)
+HTTPS_PROXY = _build_proxy_url(_HTTPS_PROXY_BASE)
+
 REGION_ID = _cfg.get("region_id", "")
 
 DMS_MONITORING_BASE_URL = f"https://dws.{REGION_ID}.myhuaweicloud.com" if REGION_ID else ""
@@ -183,6 +209,9 @@ IAM_USERNAME = _cfg.get("iam", {}).get("username", "")
 IAM_PASSWORD = _cfg.get("iam", {}).get("password", "")
 IAM_DOMAIN_NAME = _cfg.get("iam", {}).get("domain_name", "")
 IAM_PROJECT_ID = _cfg.get("iam", {}).get("project_id", "")
+
+if HTTP_PROXY or HTTPS_PROXY:
+    logger.info("Proxy configured: http_proxy=%s, https_proxy=%s", HTTP_PROXY or "(none)", HTTPS_PROXY or "(none)")
 
 if IAM_ENDPOINT and IAM_USERNAME and IAM_PASSWORD:
     logger.info(

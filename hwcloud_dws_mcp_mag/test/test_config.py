@@ -540,6 +540,43 @@ class TestConfigModuleLoad:
         assert not dws_mcp_token
 
 
+class TestBuildProxyUrl:
+    def test_empty_base_url(self):
+        from dws_autopilot_mcp.config import _build_proxy_url
+        with patch("dws_autopilot_mcp.config._PROXY_USERNAME", "user"):
+            assert _build_proxy_url("") == ""
+
+    def test_no_proxy_username(self):
+        from dws_autopilot_mcp.config import _build_proxy_url
+        with patch("dws_autopilot_mcp.config._PROXY_USERNAME", ""):
+            assert _build_proxy_url("http://proxy.example.com:8080") == "http://proxy.example.com:8080"
+
+    def test_with_proxy_username_and_port(self):
+        from dws_autopilot_mcp.config import _build_proxy_url
+        with patch("dws_autopilot_mcp.config._PROXY_USERNAME", "user"), \
+             patch("dws_autopilot_mcp.config._PROXY_PASSWORD", "pass"):
+            result = _build_proxy_url("http://proxy.example.com:8080")
+            assert "user%40" in result or "user" in result
+            assert "@proxy.example.com" in result
+            assert ":8080" in result
+
+    def test_with_proxy_username_no_port(self):
+        from dws_autopilot_mcp.config import _build_proxy_url
+        with patch("dws_autopilot_mcp.config._PROXY_USERNAME", "user"), \
+             patch("dws_autopilot_mcp.config._PROXY_PASSWORD", "pass"):
+            result = _build_proxy_url("http://proxy.example.com")
+            assert "@proxy.example.com" in result
+            assert ":8080" not in result
+
+    def test_special_chars_percent_encoded(self):
+        from dws_autopilot_mcp.config import _build_proxy_url
+        with patch("dws_autopilot_mcp.config._PROXY_USERNAME", "user@domain"), \
+             patch("dws_autopilot_mcp.config._PROXY_PASSWORD", "p@ss:word"):
+            result = _build_proxy_url("http://proxy.example.com:8080")
+            assert "user%40domain" in result
+            assert "p%40ss%3Aword" in result
+
+
 class TestModuleLevelCode:
     def test_auto_encrypt_on_import(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -616,3 +653,21 @@ class TestModuleLevelCode:
                 assert cfg_mod.REGION_ID == ""
                 assert cfg_mod.DMS_MONITORING_BASE_URL == ""
                 assert cfg_mod.IAM_ENDPOINT == ""
+
+    def test_proxy_configured_on_import(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yaml_path = Path(tmpdir) / "dws_config.yaml"
+            _write_yaml(yaml_path, {
+                "region_id": "cn-7",
+                "http_proxy": "http://proxy.example.com:8080",
+                "https_proxy": "https://proxy.example.com:8443",
+                "iam": {"username": "", "password": "", "domain_name": "", "project_id": ""},
+                "dws_mcp_token": "static-tok",
+            })
+
+            with patch.dict(os.environ, {"DWS_MCP_CONFIG": str(yaml_path)}):
+                import dws_autopilot_mcp.config as cfg_mod
+                importlib.reload(cfg_mod)
+
+                assert cfg_mod.HTTP_PROXY != ""
+                assert cfg_mod.HTTPS_PROXY != ""

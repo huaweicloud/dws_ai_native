@@ -1,7 +1,7 @@
 import ssl
 import logging
 import httpx
-from .config import DMS_MONITORING_BASE_URL, DWS_MCP_TOKEN
+from .config import DMS_MONITORING_BASE_URL, DWS_MCP_TOKEN, HTTP_PROXY, HTTPS_PROXY
 from .token_manager import is_iam_configured, get_token, force_refresh
 
 _TIMEOUT = 30.0
@@ -26,11 +26,13 @@ def _error_resp(code: int, msg: str) -> dict:
 
 
 def _make_client() -> httpx.AsyncClient:
+    proxy = HTTPS_PROXY or HTTP_PROXY or None
     return httpx.AsyncClient(
         base_url=DMS_MONITORING_BASE_URL,
         timeout=_TIMEOUT,
         verify=_ssl_ctx,
         trust_env=False,
+        proxy=proxy,
     )
 
 
@@ -94,32 +96,27 @@ async def _request(method: str, path: str, **kwargs) -> dict:
 async def get_host_overview(
     project_id: str,
     cluster_id: str,
+    offset: int = 0,
+    limit: int = 512,
     filter: str | None = None,
     value: str | None = None,
     sub_filter: str | None = None,
     sub_value: str | None = None,
-    page_size: int = 10,
-    page_num: int = 1,
-    sub_page_size: int = 10,
-    sub_page_num: int = 1,
-    sort_by: str = "DESC",
-    order_by: str = "",
-    sub_sort_by: str = "DESC",
-    sub_order_by: str = "",
-    offset: int | None = None,
-    limit: int | None = None,
+    page_size: int | None = None,
+    page_num: int | None = None,
+    sub_page_size: int | None = None,
+    sub_page_num: int | None = None,
+    sort_by: str | None = None,
+    order_by: str | None = None,
+    sub_sort_by: str | None = None,
+    sub_order_by: str | None = None,
     rate_type: str | None = None,
 ) -> dict:
-    path = f"/v1/{project_id}/clusters/{cluster_id}/dms/host-monitor/overview"
+    path = f"/v1.0/{project_id}/dms/host-overview"
     params: dict = {
-        "page_size": page_size,
-        "page_num": page_num,
-        "sub_page_size": sub_page_size,
-        "sub_page_num": sub_page_num,
-        "sort_by": sort_by,
-        "order_by": order_by,
-        "sub_sort_by": sub_sort_by,
-        "sub_order_by": sub_order_by,
+        "cluster_id": cluster_id,
+        "offset": offset,
+        "limit": limit,
     }
     if filter is not None:
         params["filter"] = filter
@@ -129,10 +126,22 @@ async def get_host_overview(
         params["sub_filter"] = sub_filter
     if sub_value is not None:
         params["sub_value"] = sub_value
-    if offset is not None:
-        params["offset"] = offset
-    if limit is not None:
-        params["limit"] = limit
+    if page_size is not None:
+        params["page_size"] = page_size
+    if page_num is not None:
+        params["page_num"] = page_num
+    if sub_page_size is not None:
+        params["sub_page_size"] = sub_page_size
+    if sub_page_num is not None:
+        params["sub_page_num"] = sub_page_num
+    if sort_by is not None:
+        params["sort_by"] = sort_by
+    if order_by is not None:
+        params["order_by"] = order_by
+    if sub_sort_by is not None:
+        params["sub_sort_by"] = sub_sort_by
+    if sub_order_by is not None:
+        params["sub_order_by"] = sub_order_by
     if rate_type is not None:
         params["rate_type"] = rate_type
     return await _request("GET", path, params=params)

@@ -84,11 +84,11 @@ async def list_tools() -> list[Tool]:
                     },
                     "offset": {
                         "type": "integer",
-                        "description": "Pagination offset.",
+                        "description": "Pagination offset, default 0.",
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Pagination limit.",
+                        "description": "Pagination limit, default 512.",
                     },
                     "rate_type": {
                         "type": "string",
@@ -159,20 +159,20 @@ async def call_tool(name: str, arguments: dict | None) -> list[TextContent]:
             result = await get_host_overview(
                 project_id=arguments["project_id"],
                 cluster_id=arguments["cluster_id"],
+                offset=arguments.get("offset", 0),
+                limit=arguments.get("limit", 512),
                 filter=arguments.get("filter"),
                 value=arguments.get("value"),
                 sub_filter=arguments.get("sub_filter"),
                 sub_value=arguments.get("sub_value"),
-                page_size=arguments.get("page_size", 10),
-                page_num=arguments.get("page_num", 1),
-                sub_page_size=arguments.get("sub_page_size", 10),
-                sub_page_num=arguments.get("sub_page_num", 1),
-                sort_by=arguments.get("sort_by", "DESC"),
-                order_by=arguments.get("order_by", ""),
-                sub_sort_by=arguments.get("sub_sort_by", "DESC"),
-                sub_order_by=arguments.get("sub_order_by", ""),
-                offset=arguments.get("offset"),
-                limit=arguments.get("limit"),
+                page_size=arguments.get("page_size"),
+                page_num=arguments.get("page_num"),
+                sub_page_size=arguments.get("sub_page_size"),
+                sub_page_num=arguments.get("sub_page_num"),
+                sort_by=arguments.get("sort_by"),
+                order_by=arguments.get("order_by"),
+                sub_sort_by=arguments.get("sub_sort_by"),
+                sub_order_by=arguments.get("sub_order_by"),
                 rate_type=arguments.get("rate_type"),
             )
         elif name == "get_metric_data_list":
@@ -198,9 +198,11 @@ async def call_tool(name: str, arguments: dict | None) -> list[TextContent]:
 
 
 async def main():
-    from .config import DWS_MCP_TOKEN, IAM_ENDPOINT, IAM_USERNAME
+    from .config import DWS_MCP_TOKEN, IAM_ENDPOINT, IAM_USERNAME, HTTP_PROXY, HTTPS_PROXY
     from .token_manager import is_iam_configured
     logger.info("Starting dws_autopilot_mcp...")
+    if HTTP_PROXY or HTTPS_PROXY:
+        logger.info("Proxy: http_proxy=%s, https_proxy=%s", HTTP_PROXY or "(none)", HTTPS_PROXY or "(none)")
     if is_iam_configured():
         logger.info(
             "IAM dynamic token mode: endpoint=%s, username=%s",

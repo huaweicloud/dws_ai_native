@@ -12,7 +12,7 @@ _ssl_ctx.check_hostname = False
 _ssl_ctx.verify_mode = ssl.CERT_NONE
 _ssl_ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
 
-from .config import IAM_ENDPOINT, IAM_USERNAME, IAM_PASSWORD, IAM_DOMAIN_NAME, IAM_PROJECT_ID
+from .config import IAM_ENDPOINT, IAM_USERNAME, IAM_PASSWORD, IAM_DOMAIN_NAME, IAM_PROJECT_ID, HTTP_PROXY, HTTPS_PROXY
 
 _cached_token: str = ""
 _token_expire_at: float = 0.0
@@ -61,8 +61,9 @@ def _parse_token_response(resp: httpx.Response) -> tuple[str, float]:
 
 async def _fetch_token_from_iam() -> tuple[str, float]:
     body = _build_iam_auth_body()
+    proxy = HTTPS_PROXY or HTTP_PROXY or None
     async with httpx.AsyncClient(
-        timeout=30.0, verify=_ssl_ctx, trust_env=False
+        timeout=30.0, verify=_ssl_ctx, trust_env=False, proxy=proxy
     ) as client:
         resp = await client.post(
             f"{IAM_ENDPOINT}/v3/auth/tokens",

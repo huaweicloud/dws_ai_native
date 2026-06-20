@@ -1,6 +1,6 @@
 import json
 import asyncio
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 
 class TestListTools:
@@ -125,3 +125,45 @@ class TestCallTool:
             assert call_kwargs["offset"] == 10
             assert call_kwargs["limit"] == 100
             assert call_kwargs["sort_by"] == "ASC"
+
+
+class TestMain:
+    def test_main_with_proxy_logs(self):
+        mock_read = AsyncMock()
+        mock_write = AsyncMock()
+        mock_stdio = MagicMock()
+        mock_stdio.__aenter__ = AsyncMock(return_value=(mock_read, mock_write))
+        mock_stdio.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("dws_autopilot_mcp.config.HTTP_PROXY", "http://proxy:8080"), \
+             patch("dws_autopilot_mcp.config.HTTPS_PROXY", ""), \
+             patch("dws_autopilot_mcp.config.DWS_MCP_TOKEN", "tok"), \
+             patch("dws_autopilot_mcp.config.IAM_ENDPOINT", ""), \
+             patch("dws_autopilot_mcp.config.IAM_USERNAME", ""), \
+             patch("dws_autopilot_mcp.token_manager.is_iam_configured", return_value=False), \
+             patch("dws_autopilot_mcp.server.stdio_server", return_value=mock_stdio), \
+             patch("dws_autopilot_mcp.server.server") as mock_server_obj:
+            mock_server_obj.run = AsyncMock()
+            mock_server_obj.create_initialization_options = MagicMock(return_value={})
+            from dws_autopilot_mcp.server import main
+            asyncio.run(main())
+
+    def test_main_with_iam_mode_logs(self):
+        mock_read = AsyncMock()
+        mock_write = AsyncMock()
+        mock_stdio = MagicMock()
+        mock_stdio.__aenter__ = AsyncMock(return_value=(mock_read, mock_write))
+        mock_stdio.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("dws_autopilot_mcp.config.HTTP_PROXY", ""), \
+             patch("dws_autopilot_mcp.config.HTTPS_PROXY", ""), \
+             patch("dws_autopilot_mcp.config.DWS_MCP_TOKEN", ""), \
+             patch("dws_autopilot_mcp.config.IAM_ENDPOINT", "https://iam.example.com"), \
+             patch("dws_autopilot_mcp.config.IAM_USERNAME", "user1"), \
+             patch("dws_autopilot_mcp.token_manager.is_iam_configured", return_value=True), \
+             patch("dws_autopilot_mcp.server.stdio_server", return_value=mock_stdio), \
+             patch("dws_autopilot_mcp.server.server") as mock_server_obj:
+            mock_server_obj.run = AsyncMock()
+            mock_server_obj.create_initialization_options = MagicMock(return_value={})
+            from dws_autopilot_mcp.server import main
+            asyncio.run(main())

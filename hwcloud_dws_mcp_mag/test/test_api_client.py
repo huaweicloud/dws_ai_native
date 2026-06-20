@@ -251,6 +251,41 @@ class TestRequest:
             assert result == {"data": "retry_ok"}
 
 
+class TestMakeClient:
+    def test_make_client_with_https_proxy(self):
+        with patch.multiple(
+            "dws_autopilot_mcp.api_client",
+            DMS_MONITORING_BASE_URL="https://dms.example.com",
+            HTTPS_PROXY="https://proxy.example.com:8080",
+            HTTP_PROXY="http://proxy.example.com:8080",
+        ):
+            from dws_autopilot_mcp.api_client import _make_client
+            client = _make_client()
+            assert client is not None
+
+    def test_make_client_with_http_proxy_only(self):
+        with patch.multiple(
+            "dws_autopilot_mcp.api_client",
+            DMS_MONITORING_BASE_URL="https://dms.example.com",
+            HTTPS_PROXY="",
+            HTTP_PROXY="http://proxy.example.com:8080",
+        ):
+            from dws_autopilot_mcp.api_client import _make_client
+            client = _make_client()
+            assert client is not None
+
+    def test_make_client_no_proxy(self):
+        with patch.multiple(
+            "dws_autopilot_mcp.api_client",
+            DMS_MONITORING_BASE_URL="https://dms.example.com",
+            HTTPS_PROXY="",
+            HTTP_PROXY="",
+        ):
+            from dws_autopilot_mcp.api_client import _make_client
+            client = _make_client()
+            assert client is not None
+
+
 class TestGetHostOverview:
     def test_basic_call(self):
         with patch.multiple(
@@ -278,6 +313,38 @@ class TestGetHostOverview:
                 offset=0, limit=10, rate_type="avg",
             ))
             assert result == {"data": "hosts"}
+
+    def test_with_all_optional_params(self):
+        with patch.multiple(
+            "dws_autopilot_mcp.api_client",
+            DMS_MONITORING_BASE_URL="https://dms.example.com",
+            DWS_MCP_TOKEN="tok",
+        ), patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=False), \
+             patch("dws_autopilot_mcp.api_client._request", new=AsyncMock(return_value={"data": "hosts"})) as mock_req:
+            from dws_autopilot_mcp.api_client import get_host_overview
+            result = asyncio.run(get_host_overview(
+                project_id="p1", cluster_id="c1",
+                filter="host_name", value="node1",
+                sub_filter="disk", sub_value="sda",
+                page_size=20, page_num=2,
+                sub_page_size=5, sub_page_num=3,
+                sort_by="ASC", order_by="cpu_usage",
+                sub_sort_by="DESC", sub_order_by="disk_usage_avg",
+                rate_type="avg",
+            ))
+            assert result == {"data": "hosts"}
+            call_kwargs = mock_req.call_args
+            params = call_kwargs[1].get("params", {}) if "params" in call_kwargs[1] else call_kwargs[0][1] if len(call_kwargs[0]) > 1 else {}
+            # Verify all optional params were included
+            assert params["page_size"] == 20
+            assert params["page_num"] == 2
+            assert params["sub_page_size"] == 5
+            assert params["sub_page_num"] == 3
+            assert params["sort_by"] == "ASC"
+            assert params["order_by"] == "cpu_usage"
+            assert params["sub_sort_by"] == "DESC"
+            assert params["sub_order_by"] == "disk_usage_avg"
+            assert params["rate_type"] == "avg"
 
 
 class TestGetMetricData:

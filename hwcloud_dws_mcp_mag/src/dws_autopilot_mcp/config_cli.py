@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -44,6 +45,10 @@ _EMPTY_CONFIG = {
         "project_id": "",
     },
     "dws_mcp_token": "",
+    "http_proxy": "",
+    "https_proxy": "",
+    "proxy_username": "",
+    "proxy_password": "",
 }
 
 
@@ -111,6 +116,14 @@ def cmd_init(args) -> None:
         cfg["iam"]["project_id"] = args.project_id
     if args.token is not None:
         cfg["dws_mcp_token"] = args.token
+    if args.http_proxy is not None:
+        cfg["http_proxy"] = args.http_proxy
+    if args.https_proxy is not None:
+        cfg["https_proxy"] = args.https_proxy
+    if args.proxy_username is not None:
+        cfg["proxy_username"] = args.proxy_username
+    if args.proxy_password is not None:
+        cfg["proxy_password"] = args.proxy_password
 
     _write_yaml(config_path, cfg)
     print(f"Config saved to {config_path}")
@@ -213,6 +226,15 @@ def cmd_show(args) -> None:
     print(f"token:       {'****** (encrypted)' if is_encrypted and has_token else '******' if has_token else '(empty)'}")
     print(f"encrypted:   {'Yes' if is_encrypted else 'No'}")
 
+    http_proxy = cfg.get("http_proxy", "")
+    https_proxy = cfg.get("https_proxy", "")
+    proxy_username = cfg.get("proxy_username", "")
+    has_proxy_password = bool(cfg.get("proxy_password", ""))
+    print(f"http_proxy:      {http_proxy or '(empty, will use system proxy)'}")
+    print(f"https_proxy:     {https_proxy or '(empty, will use system proxy)'}")
+    print(f"proxy_username:  {proxy_username or '(empty)'}")
+    print(f"proxy_password:  {'******' if has_proxy_password else '(empty)'}")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -228,6 +250,10 @@ def main() -> None:
     init_parser.add_argument("--domain_name", help="IAM domain name (account name)")
     init_parser.add_argument("--project_id", help="IAM project ID")
     init_parser.add_argument("--token", help="DWS MCP static token (alternative to IAM)")
+    init_parser.add_argument("--http_proxy", help="HTTP proxy base URL, e.g. http://proxy:port (without credentials)")
+    init_parser.add_argument("--https_proxy", help="HTTPS proxy base URL, e.g. https://proxy:port (without credentials)")
+    init_parser.add_argument("--proxy_username", help="Proxy authentication username")
+    init_parser.add_argument("--proxy_password", help="Proxy authentication password (special chars are auto-encoded)")
 
     subparsers.add_parser("encrypt", help="Encrypt plaintext password and token in config")
     subparsers.add_parser("reset", help="Reset config to empty template and remove crypto.json")

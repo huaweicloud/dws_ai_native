@@ -25,20 +25,30 @@ MCP（Model Context Protocol）是由Anthropic于2024年11月提出的开放协�
 ### 2.1 工具
 DWS Autopilot MCP Server 提供以下工具：
 
-1. **dws_service_autopilot_host_overview**
-   查询DWS集群节点信息，支持按主机名/IP过滤、分页、排序
+1. **dws_autopilot_get_clusters**
+   查询DWS集群列表，无需参数。
 
-2. **get_metric_data_list**
-   查询DWS集群指标数据，支持 cpu_usage、mem_usage、disk_usage_avg、tcp_resend_rate、disk_io、net_io 等指标
+2. **dws_autopilot_get_hosts**
+   查询DWS集群节点信息，支持过滤、分页、排序。
+   - 必填：`cluster_id`（字符串）— 集群ID
+   - 可选过滤：`filter`（host_name / work_ip）、`value`、`sub_filter`、`sub_value`
+   - 可选分页：`page_size`（默认10，最大2000）、`page_num`（默认1）、`offset`（默认0）、`limit`（默认512）
+   - 可选排序：`order_by`（cpu_usage、mem_usage、disk_usage_avg、disk_io、tcp_resend_rate、net_io）、`sort_by`（ASC / DESC，默认DESC）
+
+3. **dws_autopilot_get_metric**
+   查询DWS集群指标时序数据。
+   - 必填：`cluster_id`（字符串）、`metric_name`（字符串）、`from_ts`（13位Unix时间戳，毫秒）、`to_ts`（13位Unix时间戳，毫秒）
+   - 支持的指标：`cpu_usage`、`mem_usage`、`disk_usage_avg`、`tcp_resend_rate`、`disk_io`、`net_io`、`cpu_io_diagnose_detail`（返回包含query_id和query字段的逐查询详情）
+   - 可选：`offset`（默认0）、`limit`（最大1000，默认50）、`order_by`、`sort_by`（ASC / DESC）
 
 ### 2.2 认证方式
-支持两种认证方式（优先级从高到低）：
+采用 AK/SK 签名认证：
 
-1. **IAM 动态 Token 模式**：通过 IAM 用户名/密码自动获取临时 Token，推荐使用
-2. **静态 Token 模式**：直接配置 `dws_mcp_token`，适用于已有 Token 的场景
+- **AK/SK 签名模式**：使用华为云 Access Key（AK）和 Secret Key（SK）对每个 API 请求进行签名，签名后自动添加 `Authorization` 和 `X-Sdk-Date` 请求头完成认证。
+- 如果配置了 `project_id`，会自动添加 `X-Project-Id` 请求头，用于多项目场景。
 
 ### 2.3 配置加密
-敏感字段（IAM 密码、MCP Token）支持 AES-256-GCM 加密存储：
+敏感字段（AK、SK）支持 AES-256-GCM 加密存储：
 - 启动 MCP Server 时自动检测明文并加密
 - 基于机器指纹的密钥保护，绑定当前机器环境
 - 主密钥双重保护：crypter（存储在 yaml）+ cryptComponent（存储在 crypt.json）
@@ -64,12 +74,13 @@ pip install .
 
 ```yaml
 region_id: "cn-north-7"
-iam:
-  username: "your_iam_username"
-  password: "your_iam_password"
-  domain_name: "your_domain_name"
-  project_id: "your_project_id"
-dws_mcp_token: ""
+ak: "your_access_key"
+sk: "your_secret_key"
+project_id: "your_project_id"
+http_proxy: "http://proxy.example.com:8080"
+https_proxy: "http://proxy.example.com:8080"
+proxy_username: "your_proxy_user"
+proxy_password: "your_proxy_password"
 ```
 
 **参数说明：**
@@ -77,13 +88,15 @@ dws_mcp_token: ""
 | 参数 | 说明 | 示例 |
 |------|------|------|
 | `region_id` | 华为云区域ID，用于自动生成 API 端点 | `cn-north-7` |
-| `iam.username` | IAM 用户名 | - |
-| `iam.password` | IAM 密码（明文输入，启动后自动加密） | - |
-| `iam.domain_name` | IAM 域名（账号名） | - |
-| `iam.project_id` | IAM 项目ID | - |
-| `dws_mcp_token` | 静态 Token（与 IAM 二选一，明文输入启动后自动加密） | - |
+| `ak` | 华为云 Access Key（明文输入，启动后自动加密） | - |
+| `sk` | 华为云 Secret Key（明文输入，启动后自动加密） | - |
+| `project_id` | 项目ID，用于多项目场景的 `X-Project-Id` 请求头 | - |
+| `http_proxy` | HTTP 代理地址（可直接包含认证信息，也可通过 `proxy_username`/`proxy_password` 单独配置） | `http://proxy.example.com:8080` |
+| `https_proxy` | HTTPS 代理地址 | `http://proxy.example.com:8080` |
+| `proxy_username` | 代理认证用户名（自动注入代理URL，密码自动 percent-encoding） | - |
+| `proxy_password` | 代理认证密码（自动 percent-encoding 并注入代理URL） | - |
 
-> `region_id` 会自动生成 `DMS_MONITORING_BASE_URL`（`https://dws.{region_id}.myhuaweicloud.com`）和 `IAM_ENDPOINT`（`https://iam.{region_id}.myhuaweicloud.com`），无需手动配置。
+> `region_id` 会自动生成 `DMS_MONITORING_BASE_URL`（`https://dws.{region_id}.myhuaweicloud.com`），无需手动配置。
 
 > 也可通过环境变量 `DWS_MCP_CONFIG` 指定配置文件路径。
 
@@ -91,25 +104,15 @@ dws_mcp_token: ""
 安装后提供 `dws-mcp-config` 命令行工具，需在项目根目录（`dws_autopilot_mcp/`）下执行：
 
 #### init - 初始化/更新配置
-`init` 命令用于设置配置参数，支持两种认证方式（二选一）：
+`init` 命令用于设置配置参数：
 
-**方式一：IAM 动态 Token（推荐）**
 ```bash
-python -m dws_autopilot_mcp.config_cli init --region_id cn-north-7 --username admin --password xxx --domain_name xxx --project_id xxx
+python -m dws_autopilot_mcp.config_cli init --region_id cn-north-7 --ak your_ak --sk your_sk --project_id your_project_id
 ```
-通过 IAM 用户名/密码自动获取临时 Token，Token 自动续期，无需手动维护。
 
-**方式二：静态 Token**
-```bash
-python -m dws_autopilot_mcp.config_cli init --region_id cn-north-7 --token your_token
-```
-直接使用已有的 Token，适用于已获取 Token 的场景。
-
-> 两种方式的区别仅在于认证参数不同：方式一需提供 `--username`、`--password`、`--domain_name`、`--project_id`，方式二只需提供 `--token`。`--region_id` 为必填参数，两种方式均需提供。
+> `init` 命令支持部分更新，仅更新指定的参数，未指定的参数保持不变。例如只更新 AK：`python -m dws_autopilot_mcp.config_cli init --ak new_ak`。
 >
-> `init` 命令支持部分更新，仅更新指定的参数，未指定的参数保持不变。例如只更新密码：`python -m dws_autopilot_mcp.config_cli init --password new_password`。
->
-> 更新配置后，重启 MCP Server 即可自动加密敏感字段（password、token）。
+> 更新配置后，重启 MCP Server 即可自动加密敏感字段（AK、SK）。
 
 #### 其他命令
 
@@ -124,7 +127,7 @@ python -m dws_autopilot_mcp.config_cli show
 python -m dws_autopilot_mcp.config_cli reset
 ```
 
-> `encrypt`、`show`、`reset` 命令无需额外参数，与认证方式无关，两种模式下通用。
+> `encrypt`、`show`、`reset` 命令无需额外参数。
 
 ### 3.5 客户端配置
 以 OpenClaw 为例，在 MCP Servers 配置中添加：
@@ -145,7 +148,7 @@ python -m dws_autopilot_mcp.config_cli reset
 }
 ```
 
-> 将 `/path/to/python.exe` 替换为本机 Python 可执行文件路径，`/path/to/dws_autopilot_mcp/src` 替换为本项目 `src` 目录的绝对路径。
+> 将 `/path/to/python.exe` 替换为本机 Python 可执行文件路径，`/path/to/dws_autopilot_mcp/src` 替换为本项目 `src` 目录的绝对路径。Windows 下 PYTHONPATH 使用 `;` 分隔，Linux/macOS 使用 `:` 分隔。
 
 ## 4. 开始体验
 完成配置后，即可在客户端中通过自然语言与 DWS 集群交互，例如：

@@ -1,17 +1,21 @@
 import asyncio
 import json
 import logging
+from pathlib import Path
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
-from .api_client import get_host_overview, get_metric_data
+from .api_client import get_clusters, get_host_overview, get_metric_data
 
 server = Server("dws_autopilot_mcp")
+
+_log_dir = Path(__file__).resolve().parent.parent.parent / "logs"
+_log_dir.mkdir(exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    filename="dws_autopilot_mcp-log.out",
+    filename=str(_log_dir / "dws_autopilot_mcp-log.out"),
 )
 logger = logging.getLogger("dws_autopilot_mcp")
 
@@ -21,15 +25,19 @@ async def list_tools() -> list[Tool]:
     logger.info("Listing available tools")
     return [
         Tool(
-            name="dws_service_autopilot_host_overview",
+            name="dws_autopilot_get_clusters",
+            description="查询dws集群列表",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+        Tool(
+            name="dws_autopilot_get_hosts",
             description="查询dws集群节点信息",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "project_id": {
-                        "type": "string",
-                        "description": "Project ID (required).",
-                    },
                     "cluster_id": {
                         "type": "string",
                         "description": "Cluster ID (required).",
@@ -95,26 +103,22 @@ async def list_tools() -> list[Tool]:
                         "description": "Rate type.",
                     },
                 },
-                "required": ["project_id", "cluster_id"],
+                "required": ["cluster_id"],
             },
         ),
         Tool(
-            name="get_metric_data_list",
+            name="dws_autopilot_get_metric",
             description="查询dws集群指标数据",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "project_id": {
-                        "type": "string",
-                        "description": "Project ID (required).",
-                    },
                     "cluster_id": {
                         "type": "string",
                         "description": "Cluster ID (required).",
                     },
                     "metric_name": {
                         "type": "string",
-                        "description": "Metric name, e.g. cpu_usage, mem_usage, disk_usage_avg, tcp_resend_rate, disk_io, net_io.",
+                        "description": 'Metric name, e.g. cpu_usage, mem_usage, disk_usage_avg, tcp_resend_rate, disk_io, net_io, cpu_io_diagnose_detail. Note: cpu_io_diagnose_detail returns per-query detail including query_id and query fields.',
                     },
                     "from_ts": {
                         "type": "integer",
@@ -141,7 +145,7 @@ async def list_tools() -> list[Tool]:
                         "description": 'Sort direction "ASC" or "DESC".',
                     },
                 },
-                "required": ["project_id", "cluster_id", "metric_name", "from_ts", "to_ts"],
+                "required": ["cluster_id", "metric_name", "from_ts", "to_ts"],
             },
         ),
     ]
@@ -155,9 +159,10 @@ async def call_tool(name: str, arguments: dict | None) -> list[TextContent]:
         arguments = {}
 
     try:
-        if name == "dws_service_autopilot_host_overview":
+        if name == "dws_autopilot_get_clusters":
+            result = await get_clusters()
+        elif name == "dws_autopilot_get_hosts":
             result = await get_host_overview(
-                project_id=arguments["project_id"],
                 cluster_id=arguments["cluster_id"],
                 offset=arguments.get("offset", 0),
                 limit=arguments.get("limit", 512),
@@ -175,9 +180,8 @@ async def call_tool(name: str, arguments: dict | None) -> list[TextContent]:
                 sub_order_by=arguments.get("sub_order_by"),
                 rate_type=arguments.get("rate_type"),
             )
-        elif name == "get_metric_data_list":
+        elif name == "dws_autopilot_get_metric":
             result = await get_metric_data(
-                project_id=arguments["project_id"],
                 cluster_id=arguments["cluster_id"],
                 metric_name=arguments["metric_name"],
                 from_ts=arguments["from_ts"],
@@ -198,23 +202,17 @@ async def call_tool(name: str, arguments: dict | None) -> list[TextContent]:
 
 
 async def main():
-    from .config import DWS_MCP_TOKEN, IAM_ENDPOINT, IAM_USERNAME, HTTP_PROXY, HTTPS_PROXY
-    from .token_manager import is_iam_configured
+    from .config import SDK_AK, SDK_SK, HTTP_PROXY, HTTPS_PROXY
     logger.info("Starting dws_autopilot_mcp...")
     if HTTP_PROXY or HTTPS_PROXY:
         logger.info("Proxy: http_proxy=%s, https_proxy=%s", HTTP_PROXY or "(none)", HTTPS_PROXY or "(none)")
-    if is_iam_configured():
-        logger.info(
-            "IAM dynamic token mode: endpoint=%s, username=%s",
-            IAM_ENDPOINT,
-            IAM_USERNAME,
-        )
-    elif DWS_MCP_TOKEN:
-        logger.info("DWS_MCP_TOKEN is configured (length: %d)", len(DWS_MCP_TOKEN))
+    if SDK_AK and SDK_SK:
+        logger.info("AK/SK authentication configured")
     else:
         logger.warning(
-            "Neither IAM credentials nor DWS_MCP_TOKEN is configured. "
-            "API requests may fail with 401."
+            "AK/SK is not configured. "
+            "API requests may fail with 401. "
+            "Please configure ak and sk in conf/dws_config.yaml."
         )
     async with stdio_server() as (read_stream, write_stream):
         try:

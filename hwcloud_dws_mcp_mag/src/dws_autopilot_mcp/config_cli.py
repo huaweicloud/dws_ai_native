@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -38,13 +37,9 @@ def _write_yaml(path: Path, data: dict) -> None:
 
 _EMPTY_CONFIG = {
     "region_id": "",
-    "iam": {
-        "username": "",
-        "password": "",
-        "domain_name": "",
-        "project_id": "",
-    },
-    "dws_mcp_token": "",
+    "ak": "",
+    "sk": "",
+    "project_id": "",
     "http_proxy": "",
     "https_proxy": "",
     "proxy_username": "",
@@ -70,22 +65,21 @@ def _decrypt_cfg_if_needed(cfg: dict) -> dict:
     nonce = base64.b64decode(nonce_b64)
     result = dict(cfg)
 
-    encrypted_password = result.get("iam", {}).get("password", "")
-    if encrypted_password:
+    encrypted_ak = result.get("ak", "")
+    if encrypted_ak:
         try:
-            result["iam"] = dict(result.get("iam", {}))
-            result["iam"]["password"] = decrypt_value(encrypted_password, master_key, nonce)
+            result["ak"] = decrypt_value(encrypted_ak, master_key, nonce)
         except Exception as e:
-            logger.warning("Failed to decrypt iam.password: %s", e)
-            result["iam"]["password"] = ""
+            logger.warning("Failed to decrypt ak: %s", e)
+            result["ak"] = ""
 
-    encrypted_token = result.get("dws_mcp_token", "")
-    if encrypted_token:
+    encrypted_sk = result.get("sk", "")
+    if encrypted_sk:
         try:
-            result["dws_mcp_token"] = decrypt_value(encrypted_token, master_key, nonce)
+            result["sk"] = decrypt_value(encrypted_sk, master_key, nonce)
         except Exception as e:
-            logger.warning("Failed to decrypt dws_mcp_token: %s", e)
-            result["dws_mcp_token"] = ""
+            logger.warning("Failed to decrypt sk: %s", e)
+            result["sk"] = ""
 
     return result
 
@@ -102,20 +96,14 @@ def cmd_init(args) -> None:
     if "encrypt" in cfg:
         del cfg["encrypt"]
 
-    cfg.setdefault("iam", {})
-
     if args.region_id is not None:
         cfg["region_id"] = args.region_id
-    if args.username is not None:
-        cfg["iam"]["username"] = args.username
-    if args.password is not None:
-        cfg["iam"]["password"] = args.password
-    if args.domain_name is not None:
-        cfg["iam"]["domain_name"] = args.domain_name
+    if args.ak is not None:
+        cfg["ak"] = args.ak
+    if args.sk is not None:
+        cfg["sk"] = args.sk
     if args.project_id is not None:
-        cfg["iam"]["project_id"] = args.project_id
-    if args.token is not None:
-        cfg["dws_mcp_token"] = args.token
+        cfg["project_id"] = args.project_id
     if args.http_proxy is not None:
         cfg["http_proxy"] = args.http_proxy
     if args.https_proxy is not None:
@@ -142,10 +130,10 @@ def cmd_encrypt(args) -> None:
         print("Already encrypted. Use 'reset' or 'init' to update values first.")
         return
 
-    password = cfg.get("iam", {}).get("password", "")
-    token = cfg.get("dws_mcp_token", "")
+    ak = cfg.get("ak", "")
+    sk = cfg.get("sk", "")
 
-    if not password and not token:
+    if not ak and not sk:
         print("No plaintext sensitive fields found. Nothing to encrypt.")
         return
 
@@ -153,16 +141,14 @@ def cmd_encrypt(args) -> None:
     nonce = _generate_nonce()
 
     result = dict(cfg)
-    result.setdefault("iam", {})
 
-    if password:
-        result["iam"] = dict(result.get("iam", {}))
-        result["iam"]["password"] = encrypt_value(password, master_key, nonce)
-        print("Encrypted iam.password")
+    if ak:
+        result["ak"] = encrypt_value(ak, master_key, nonce)
+        print("Encrypted ak")
 
-    if token:
-        result["dws_mcp_token"] = encrypt_value(token, master_key, nonce)
-        print("Encrypted dws_mcp_token")
+    if sk:
+        result["sk"] = encrypt_value(sk, master_key, nonce)
+        print("Encrypted sk")
 
     crypter, crypt_component = encrypt_master_key(master_key)
     nonce_b64 = base64.b64encode(nonce).decode("ascii")
@@ -210,20 +196,16 @@ def cmd_show(args) -> None:
     encrypt_section = cfg.get("encrypt", {})
 
     region_id = cfg.get("region_id", "")
-    username = cfg.get("iam", {}).get("username", "")
-    domain_name = cfg.get("iam", {}).get("domain_name", "")
-    project_id = cfg.get("iam", {}).get("project_id", "")
-    has_password = bool(cfg.get("iam", {}).get("password", ""))
-    has_token = bool(cfg.get("dws_mcp_token", ""))
+    project_id = cfg.get("project_id", "")
+    has_ak = bool(cfg.get("ak", ""))
+    has_sk = bool(cfg.get("sk", ""))
     is_encrypted = bool(encrypt_section.get("crypter"))
 
     print(f"Config file: {config_path}")
     print(f"region_id:   {region_id or '(empty)'}")
-    print(f"username:    {username or '(empty)'}")
-    print(f"domain_name: {domain_name or '(empty)'}")
     print(f"project_id:  {project_id or '(empty)'}")
-    print(f"password:    {'****** (encrypted)' if is_encrypted and has_password else '******' if has_password else '(empty)'}")
-    print(f"token:       {'****** (encrypted)' if is_encrypted and has_token else '******' if has_token else '(empty)'}")
+    print(f"ak:          {'****** (encrypted)' if is_encrypted and has_ak else '******' if has_ak else '(empty)'}")
+    print(f"sk:          {'****** (encrypted)' if is_encrypted and has_sk else '******' if has_sk else '(empty)'}")
     print(f"encrypted:   {'Yes' if is_encrypted else 'No'}")
 
     http_proxy = cfg.get("http_proxy", "")
@@ -245,17 +227,15 @@ def main() -> None:
 
     init_parser = subparsers.add_parser("init", help="Initialize or update config values")
     init_parser.add_argument("--region_id", help="Region ID, e.g. cn-north-7")
-    init_parser.add_argument("--username", help="IAM username")
-    init_parser.add_argument("--password", help="IAM password")
-    init_parser.add_argument("--domain_name", help="IAM domain name (account name)")
-    init_parser.add_argument("--project_id", help="IAM project ID")
-    init_parser.add_argument("--token", help="DWS MCP static token (alternative to IAM)")
+    init_parser.add_argument("--ak", help="HUAWEICLOUD SDK AK (Access Key)")
+    init_parser.add_argument("--sk", help="HUAWEICLOUD SDK SK (Secret Key)")
+    init_parser.add_argument("--project_id", help="Project ID for X-Project-Id header")
     init_parser.add_argument("--http_proxy", help="HTTP proxy base URL, e.g. http://proxy:port (without credentials)")
     init_parser.add_argument("--https_proxy", help="HTTPS proxy base URL, e.g. https://proxy:port (without credentials)")
     init_parser.add_argument("--proxy_username", help="Proxy authentication username")
     init_parser.add_argument("--proxy_password", help="Proxy authentication password (special chars are auto-encoded)")
 
-    subparsers.add_parser("encrypt", help="Encrypt plaintext password and token in config")
+    subparsers.add_parser("encrypt", help="Encrypt plaintext ak and sk in config")
     subparsers.add_parser("reset", help="Reset config to empty template and remove crypto.json")
     subparsers.add_parser("show", help="Show current config status (no secrets revealed)")
 

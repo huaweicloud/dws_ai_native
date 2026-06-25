@@ -1,7 +1,5 @@
 region_id: ''
-iam:
-  username: ''
-  password: ''
-  domain_name: ''
-  project_id: ''
-dws_mcp_token: ''
+ak: ''
+sk: ''
+project_id: ''
+http_proxy: ''

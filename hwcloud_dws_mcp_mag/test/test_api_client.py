@@ -11,39 +11,6 @@ def _make_async_client_mock(response):
     return mock_client
 
 
-class TestBuildHeaders:
-    def test_default_headers_with_token(self):
-        with patch.multiple(
-            "dws_autopilot_mcp.api_client",
-            _DEFAULT_HEADERS={"X-Custom": "val"},
-            DWS_MCP_TOKEN="static-tok",
-        ):
-            from dws_autopilot_mcp.api_client import _build_headers
-            headers = _build_headers()
-            assert headers["X-Custom"] == "val"
-            assert "X-Auth-Token" not in headers
-
-    def test_custom_headers_merge(self):
-        with patch.multiple(
-            "dws_autopilot_mcp.api_client",
-            _DEFAULT_HEADERS={},
-            DWS_MCP_TOKEN="",
-        ):
-            from dws_autopilot_mcp.api_client import _build_headers
-            headers = _build_headers(headers={"X-Extra": "extra"})
-            assert headers["X-Extra"] == "extra"
-
-    def test_no_token_no_header(self):
-        with patch.multiple(
-            "dws_autopilot_mcp.api_client",
-            _DEFAULT_HEADERS={},
-            DWS_MCP_TOKEN="",
-        ):
-            from dws_autopilot_mcp.api_client import _build_headers
-            headers = _build_headers()
-            assert "X-Auth-Token" not in headers
-
-
 class TestErrorResp:
     def test_error_resp_structure(self):
         from dws_autopilot_mcp.api_client import _error_resp
@@ -93,169 +60,10 @@ class TestHandleErrorResponse:
         assert result is None
 
 
-class TestHandle401Retry:
-    def test_iam_not_configured_returns_none(self):
-        with patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=False):
-            from dws_autopilot_mcp.api_client import _handle_401_retry
-            result = asyncio.run(_handle_401_retry("GET", "/test", {}, {}))
-            assert result is None
-
-    def test_refresh_failure_returns_error(self):
-        with patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=True), \
-             patch("dws_autopilot_mcp.api_client.force_refresh", new=AsyncMock(side_effect=Exception("refresh fail"))):
-            from dws_autopilot_mcp.api_client import _handle_401_retry
-            result = asyncio.run(_handle_401_retry("GET", "/test", {}, {}))
-            assert result["code"] == -1
-            assert "refresh failed" in result["msg"]
-
-    def test_retry_still_401_returns_error(self):
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 401
-
-        mock_client = _make_async_client_mock(mock_resp)
-
-        with patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=True), \
-             patch("dws_autopilot_mcp.api_client.force_refresh", new=AsyncMock(return_value="new-tok")), \
-             patch("dws_autopilot_mcp.api_client._make_client", return_value=mock_client):
-            from dws_autopilot_mcp.api_client import _handle_401_retry
-            result = asyncio.run(_handle_401_retry("GET", "/test", {}, {}))
-            assert result["code"] == -1
-            assert "did not resolve" in result["msg"]
-
-    def test_retry_success_returns_response(self):
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
-
-        mock_client = _make_async_client_mock(mock_resp)
-
-        with patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=True), \
-             patch("dws_autopilot_mcp.api_client.force_refresh", new=AsyncMock(return_value="new-tok")), \
-             patch("dws_autopilot_mcp.api_client._make_client", return_value=mock_client):
-            from dws_autopilot_mcp.api_client import _handle_401_retry
-            result = asyncio.run(_handle_401_retry("GET", "/test", {}, {}))
-            assert isinstance(result, httpx.Response)
-
-
-class TestRequest:
-    def test_success_request(self):
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"data": "ok"}
-
-        mock_client = _make_async_client_mock(mock_resp)
-
-        with patch.multiple(
-            "dws_autopilot_mcp.api_client",
-            DMS_MONITORING_BASE_URL="https://dms.example.com",
-            DWS_MCP_TOKEN="static-tok",
-        ), patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=False), \
-             patch("dws_autopilot_mcp.api_client._make_client", return_value=mock_client), \
-             patch("dws_autopilot_mcp.api_client._handle_error_response", new=AsyncMock(return_value=None)):
-            from dws_autopilot_mcp.api_client import _request
-            result = asyncio.run(_request("GET", "/test"))
-            assert result == {"data": "ok"}
-
-    def test_request_with_iam_token(self):
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"data": "ok"}
-
-        mock_client = _make_async_client_mock(mock_resp)
-
-        with patch.multiple(
-            "dws_autopilot_mcp.api_client",
-            DMS_MONITORING_BASE_URL="https://dms.example.com",
-            DWS_MCP_TOKEN="",
-        ), patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=True), \
-             patch("dws_autopilot_mcp.api_client.get_token", new=AsyncMock(return_value="iam-tok")), \
-             patch("dws_autopilot_mcp.api_client._make_client", return_value=mock_client), \
-             patch("dws_autopilot_mcp.api_client._handle_error_response", new=AsyncMock(return_value=None)):
-            from dws_autopilot_mcp.api_client import _request
-            result = asyncio.run(_request("GET", "/test"))
-            assert result == {"data": "ok"}
-
-    def test_request_401_retry_returns_dict_error(self):
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 401
-
-        mock_client = _make_async_client_mock(mock_resp)
-
-        with patch.multiple(
-            "dws_autopilot_mcp.api_client",
-            DMS_MONITORING_BASE_URL="https://dms.example.com",
-            DWS_MCP_TOKEN="",
-        ), patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=True), \
-             patch("dws_autopilot_mcp.api_client.get_token", new=AsyncMock(return_value="iam-tok")), \
-             patch("dws_autopilot_mcp.api_client._make_client", return_value=mock_client), \
-             patch("dws_autopilot_mcp.api_client._handle_401_retry", new=AsyncMock(return_value={"code": -1, "msg": "retry failed", "data": None})):
-            from dws_autopilot_mcp.api_client import _request
-            result = asyncio.run(_request("GET", "/test"))
-            assert result["code"] == -1
-
-    def test_request_error_response(self):
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 500
-
-        mock_client = _make_async_client_mock(mock_resp)
-
-        with patch.multiple(
-            "dws_autopilot_mcp.api_client",
-            DMS_MONITORING_BASE_URL="https://dms.example.com",
-            DWS_MCP_TOKEN="static-tok",
-        ), patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=False), \
-             patch("dws_autopilot_mcp.api_client._make_client", return_value=mock_client), \
-             patch("dws_autopilot_mcp.api_client._handle_error_response", new=AsyncMock(return_value={"error": "server error", "status_code": 500})):
-            from dws_autopilot_mcp.api_client import _request
-            result = asyncio.run(_request("GET", "/test"))
-            assert result["status_code"] == 500
-
-    def test_request_401_no_iam_returns_error(self):
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 401
-
-        mock_client = _make_async_client_mock(mock_resp)
-
-        with patch.multiple(
-            "dws_autopilot_mcp.api_client",
-            DMS_MONITORING_BASE_URL="https://dms.example.com",
-            DWS_MCP_TOKEN="static-tok",
-        ), patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=False), \
-             patch("dws_autopilot_mcp.api_client._make_client", return_value=mock_client), \
-             patch("dws_autopilot_mcp.api_client._handle_error_response", new=AsyncMock(return_value={"code": -1, "msg": "401 Unauthorized", "data": None})):
-            from dws_autopilot_mcp.api_client import _request
-            result = asyncio.run(_request("GET", "/test"))
-            assert result["code"] == -1
-
-    def test_request_401_iam_retry_with_response(self):
-        mock_resp_401 = MagicMock(spec=httpx.Response)
-        mock_resp_401.status_code = 401
-        mock_resp_401.json.return_value = {"data": "retry_ok"}
-
-        mock_resp_retry = MagicMock(spec=httpx.Response)
-        mock_resp_retry.status_code = 200
-        mock_resp_retry.json.return_value = {"data": "retry_ok"}
-
-        mock_client = _make_async_client_mock(mock_resp_401)
-
-        with patch.multiple(
-            "dws_autopilot_mcp.api_client",
-            DMS_MONITORING_BASE_URL="https://dms.example.com",
-            DWS_MCP_TOKEN="",
-        ), patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=True), \
-             patch("dws_autopilot_mcp.api_client.get_token", new=AsyncMock(return_value="iam-tok")), \
-             patch("dws_autopilot_mcp.api_client._make_client", return_value=mock_client), \
-             patch("dws_autopilot_mcp.api_client._handle_401_retry", new=AsyncMock(return_value=mock_resp_retry)), \
-             patch("dws_autopilot_mcp.api_client._handle_error_response", new=AsyncMock(return_value=None)):
-            from dws_autopilot_mcp.api_client import _request
-            result = asyncio.run(_request("GET", "/test"))
-            assert result == {"data": "retry_ok"}
-
-
 class TestMakeClient:
     def test_make_client_with_https_proxy(self):
         with patch.multiple(
             "dws_autopilot_mcp.api_client",
-            DMS_MONITORING_BASE_URL="https://dms.example.com",
             HTTPS_PROXY="https://proxy.example.com:8080",
             HTTP_PROXY="http://proxy.example.com:8080",
         ):
@@ -266,7 +74,6 @@ class TestMakeClient:
     def test_make_client_with_http_proxy_only(self):
         with patch.multiple(
             "dws_autopilot_mcp.api_client",
-            DMS_MONITORING_BASE_URL="https://dms.example.com",
             HTTPS_PROXY="",
             HTTP_PROXY="http://proxy.example.com:8080",
         ):
@@ -277,7 +84,6 @@ class TestMakeClient:
     def test_make_client_no_proxy(self):
         with patch.multiple(
             "dws_autopilot_mcp.api_client",
-            DMS_MONITORING_BASE_URL="https://dms.example.com",
             HTTPS_PROXY="",
             HTTP_PROXY="",
         ):
@@ -286,28 +92,44 @@ class TestMakeClient:
             assert client is not None
 
 
+class TestGetClusters:
+    def test_basic_call(self):
+        with patch.multiple(
+            "dws_autopilot_mcp.api_client",
+            DMS_MONITORING_BASE_URL="https://dms.example.com",
+            SDK_AK="test_ak",
+            SDK_SK="test_sk",
+            PROJECT_ID="test_proj",
+        ), patch("dws_autopilot_mcp.api_client._request", new=AsyncMock(return_value={"clusters": []})):
+            from dws_autopilot_mcp.api_client import get_clusters
+            result = asyncio.run(get_clusters())
+            assert result == {"clusters": []}
+
+
 class TestGetHostOverview:
     def test_basic_call(self):
         with patch.multiple(
             "dws_autopilot_mcp.api_client",
             DMS_MONITORING_BASE_URL="https://dms.example.com",
-            DWS_MCP_TOKEN="tok",
-        ), patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=False), \
-             patch("dws_autopilot_mcp.api_client._request", new=AsyncMock(return_value={"data": "hosts"})):
+            SDK_AK="test_ak",
+            SDK_SK="test_sk",
+            PROJECT_ID="test_proj",
+        ), patch("dws_autopilot_mcp.api_client._request", new=AsyncMock(return_value={"data": "hosts"})):
             from dws_autopilot_mcp.api_client import get_host_overview
-            result = asyncio.run(get_host_overview(project_id="p1", cluster_id="c1"))
+            result = asyncio.run(get_host_overview(cluster_id="c1"))
             assert result == {"data": "hosts"}
 
     def test_with_optional_params(self):
         with patch.multiple(
             "dws_autopilot_mcp.api_client",
             DMS_MONITORING_BASE_URL="https://dms.example.com",
-            DWS_MCP_TOKEN="tok",
-        ), patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=False), \
-             patch("dws_autopilot_mcp.api_client._request", new=AsyncMock(return_value={"data": "hosts"})) as mock_req:
+            SDK_AK="test_ak",
+            SDK_SK="test_sk",
+            PROJECT_ID="test_proj",
+        ), patch("dws_autopilot_mcp.api_client._request", new=AsyncMock(return_value={"data": "hosts"})) as mock_req:
             from dws_autopilot_mcp.api_client import get_host_overview
             result = asyncio.run(get_host_overview(
-                project_id="p1", cluster_id="c1",
+                cluster_id="c1",
                 filter="host_name", value="node1",
                 sub_filter="disk", sub_value="sda",
                 offset=0, limit=10, rate_type="avg",
@@ -318,12 +140,13 @@ class TestGetHostOverview:
         with patch.multiple(
             "dws_autopilot_mcp.api_client",
             DMS_MONITORING_BASE_URL="https://dms.example.com",
-            DWS_MCP_TOKEN="tok",
-        ), patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=False), \
-             patch("dws_autopilot_mcp.api_client._request", new=AsyncMock(return_value={"data": "hosts"})) as mock_req:
+            SDK_AK="test_ak",
+            SDK_SK="test_sk",
+            PROJECT_ID="test_proj",
+        ), patch("dws_autopilot_mcp.api_client._request", new=AsyncMock(return_value={"data": "hosts"})) as mock_req:
             from dws_autopilot_mcp.api_client import get_host_overview
             result = asyncio.run(get_host_overview(
-                project_id="p1", cluster_id="c1",
+                cluster_id="c1",
                 filter="host_name", value="node1",
                 sub_filter="disk", sub_value="sda",
                 page_size=20, page_num=2,
@@ -335,7 +158,6 @@ class TestGetHostOverview:
             assert result == {"data": "hosts"}
             call_kwargs = mock_req.call_args
             params = call_kwargs[1].get("params", {}) if "params" in call_kwargs[1] else call_kwargs[0][1] if len(call_kwargs[0]) > 1 else {}
-            # Verify all optional params were included
             assert params["page_size"] == 20
             assert params["page_num"] == 2
             assert params["sub_page_size"] == 5
@@ -352,12 +174,13 @@ class TestGetMetricData:
         with patch.multiple(
             "dws_autopilot_mcp.api_client",
             DMS_MONITORING_BASE_URL="https://dms.example.com",
-            DWS_MCP_TOKEN="tok",
-        ), patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=False), \
-             patch("dws_autopilot_mcp.api_client._request", new=AsyncMock(return_value={"data": "metrics"})):
+            SDK_AK="test_ak",
+            SDK_SK="test_sk",
+            PROJECT_ID="test_proj",
+        ), patch("dws_autopilot_mcp.api_client._request", new=AsyncMock(return_value={"data": "metrics"})):
             from dws_autopilot_mcp.api_client import get_metric_data
             result = asyncio.run(get_metric_data(
-                project_id="p1", cluster_id="c1",
+                cluster_id="c1",
                 metric_name="cpu_usage", from_ts=1000, to_ts=2000,
                 order_by="cpu_usage", sort_by="ASC",
             ))
@@ -367,12 +190,102 @@ class TestGetMetricData:
         with patch.multiple(
             "dws_autopilot_mcp.api_client",
             DMS_MONITORING_BASE_URL="https://dms.example.com",
-            DWS_MCP_TOKEN="tok",
-        ), patch("dws_autopilot_mcp.api_client.is_iam_configured", return_value=False), \
-             patch("dws_autopilot_mcp.api_client._request", new=AsyncMock(return_value={"data": "metrics"})) as mock_req:
+            SDK_AK="test_ak",
+            SDK_SK="test_sk",
+            PROJECT_ID="test_proj",
+        ), patch("dws_autopilot_mcp.api_client._request", new=AsyncMock(return_value={"data": "metrics"})):
             from dws_autopilot_mcp.api_client import get_metric_data
             result = asyncio.run(get_metric_data(
-                project_id="p1", cluster_id="c1",
+                cluster_id="c1",
                 metric_name="cpu_usage", from_ts=1000, to_ts=2000,
             ))
             assert result == {"data": "metrics"}
+
+
+class TestSignRequest:
+    def test_sign_request_with_params(self):
+        with patch.multiple(
+            "dws_autopilot_mcp.api_client",
+            DMS_MONITORING_BASE_URL="https://dws.example.com",
+            SDK_AK="test_ak",
+            SDK_SK="test_sk",
+            PROJECT_ID="test_proj",
+        ):
+            from dws_autopilot_mcp.api_client import _sign_request
+            r = _sign_request("GET", "/v1/test", params={"cluster_id": "c1", "offset": "0"})
+            assert r.uri == "/v1/test"
+            assert "cluster_id" in r.query
+            assert "Authorization" in r.headers
+            assert r.headers["X-Project-Id"] == "test_proj"
+
+    def test_sign_request_without_params(self):
+        with patch.multiple(
+            "dws_autopilot_mcp.api_client",
+            DMS_MONITORING_BASE_URL="https://dws.example.com",
+            SDK_AK="test_ak",
+            SDK_SK="test_sk",
+            PROJECT_ID="test_proj",
+        ):
+            from dws_autopilot_mcp.api_client import _sign_request
+            r = _sign_request("GET", "/v1/test")
+            assert r.query == {}
+            assert "Authorization" in r.headers
+
+    def test_sign_request_without_project_id(self):
+        with patch.multiple(
+            "dws_autopilot_mcp.api_client",
+            DMS_MONITORING_BASE_URL="https://dws.example.com",
+            SDK_AK="test_ak",
+            SDK_SK="test_sk",
+            PROJECT_ID="",
+        ):
+            from dws_autopilot_mcp.api_client import _sign_request
+            r = _sign_request("GET", "/v1/test")
+            assert "X-Project-Id" not in r.headers
+
+
+class TestRequestQueryString:
+    def test_request_url_includes_query_params(self):
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": "ok"}
+
+        mock_client = _make_async_client_mock(mock_resp)
+
+        with patch.multiple(
+            "dws_autopilot_mcp.api_client",
+            DMS_MONITORING_BASE_URL="https://dws.example.com",
+            SDK_AK="test_ak",
+            SDK_SK="test_sk",
+            PROJECT_ID="test_proj",
+            HTTPS_PROXY="",
+            HTTP_PROXY="",
+        ), patch("dws_autopilot_mcp.api_client.httpx.AsyncClient", return_value=mock_client):
+            from dws_autopilot_mcp.api_client import _request
+            asyncio.run(_request("GET", "/v1/test", params={"cluster_id": "c1", "limit": "10"}))
+            call_args = mock_client.request.call_args
+            url = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("url", "")
+            assert "cluster_id=c1" in url
+            assert "limit=10" in url
+
+    def test_request_url_without_query_params(self):
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": "ok"}
+
+        mock_client = _make_async_client_mock(mock_resp)
+
+        with patch.multiple(
+            "dws_autopilot_mcp.api_client",
+            DMS_MONITORING_BASE_URL="https://dws.example.com",
+            SDK_AK="test_ak",
+            SDK_SK="test_sk",
+            PROJECT_ID="test_proj",
+            HTTPS_PROXY="",
+            HTTP_PROXY="",
+        ), patch("dws_autopilot_mcp.api_client.httpx.AsyncClient", return_value=mock_client):
+            from dws_autopilot_mcp.api_client import _request
+            asyncio.run(_request("GET", "/v1/test"))
+            call_args = mock_client.request.call_args
+            url = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("url", "")
+            assert "?" not in url

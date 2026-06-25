@@ -25,20 +25,30 @@ Setting up the DWS Autopilot MCP Server allows users to leverage LLM capabilitie
 ### 2.1 Tools
 DWS Autopilot MCP Server provides the following tools:
 
-1. **dws_service_autopilot_host_overview**
-   Query DWS cluster host information with filtering by hostname/IP, pagination, and sorting support
+1. **dws_autopilot_get_clusters**
+   Query DWS cluster list. No parameters required.
 
-2. **get_metric_data_list**
-   Query DWS cluster metric data, supporting cpu_usage, mem_usage, disk_usage_avg, tcp_resend_rate, disk_io, net_io, etc.
+2. **dws_autopilot_get_hosts**
+   Query DWS cluster host information with filtering, pagination, and sorting support.
+   - Required: `cluster_id` (string) — Cluster ID
+   - Optional filtering: `filter` (host_name / work_ip), `value`, `sub_filter`, `sub_value`
+   - Optional pagination: `page_size` (default 10, max 2000), `page_num` (default 1), `offset` (default 0), `limit` (default 512)
+   - Optional sorting: `order_by` (cpu_usage, mem_usage, disk_usage_avg, disk_io, tcp_resend_rate, net_io), `sort_by` (ASC / DESC, default DESC)
+
+3. **dws_autopilot_get_metric**
+   Query DWS cluster metric time-series data.
+   - Required: `cluster_id` (string), `metric_name` (string), `from_ts` (13-digit unix timestamp in ms), `to_ts` (13-digit unix timestamp in ms)
+   - Supported metrics: `cpu_usage`, `mem_usage`, `disk_usage_avg`, `tcp_resend_rate`, `disk_io`, `net_io`, `cpu_io_diagnose_detail` (returns per-query detail including query_id and query fields)
+   - Optional: `offset` (default 0), `limit` (max 1000, default 50), `order_by`, `sort_by` (ASC / DESC)
 
 ### 2.2 Authentication
-Two authentication modes are supported (in priority order):
+AK/SK signature authentication is used:
 
-1. **IAM Dynamic Token Mode**: Automatically obtains temporary tokens via IAM username/password (recommended)
-2. **Static Token Mode**: Directly configure `dws_mcp_token`, suitable when you already have a token
+- **AK/SK Signature Mode**: Use Huawei Cloud Access Key (AK) and Secret Key (SK) to sign each API request. The signature automatically adds `Authorization` and `X-Sdk-Date` headers for authentication.
+- If `project_id` is configured, the `X-Project-Id` header is automatically added for multi-project scenarios.
 
 ### 2.3 Config Encryption
-Sensitive fields (IAM password, MCP token) support AES-256-GCM encrypted storage:
+Sensitive fields (AK, SK) support AES-256-GCM encrypted storage:
 - Auto-detects plaintext and encrypts on MCP Server startup
 - Machine fingerprint-based key protection, bound to the current machine environment
 - Master key dual protection: crypter (stored in yaml) + cryptComponent (stored in crypt.json)
@@ -64,12 +74,13 @@ The configuration file is located at `conf/dws_config.yaml`. Fill in the configu
 
 ```yaml
 region_id: "cn-north-7"
-iam:
-  username: "your_iam_username"
-  password: "your_iam_password"
-  domain_name: "your_domain_name"
-  project_id: "your_project_id"
-dws_mcp_token: ""
+ak: "your_access_key"
+sk: "your_secret_key"
+project_id: "your_project_id"
+http_proxy: "http://proxy.example.com:8080"
+https_proxy: "http://proxy.example.com:8080"
+proxy_username: "your_proxy_user"
+proxy_password: "your_proxy_password"
 ```
 
 **Parameter Reference:**
@@ -77,13 +88,15 @@ dws_mcp_token: ""
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `region_id` | Huawei Cloud region ID, used to auto-generate API endpoints | `cn-north-7` |
-| `iam.username` | IAM username | - |
-| `iam.password` | IAM password (enter plaintext, auto-encrypted on startup) | - |
-| `iam.domain_name` | IAM domain name (account name) | - |
-| `iam.project_id` | IAM project ID | - |
-| `dws_mcp_token` | Static token (alternative to IAM, auto-encrypted on startup) | - |
+| `ak` | Huawei Cloud Access Key (enter plaintext, auto-encrypted on startup) | - |
+| `sk` | Huawei Cloud Secret Key (enter plaintext, auto-encrypted on startup) | - |
+| `project_id` | Project ID, used for `X-Project-Id` header in multi-project scenarios | - |
+| `http_proxy` | HTTP proxy URL (can include credentials, or use `proxy_username`/`proxy_password` separately) | `http://proxy.example.com:8080` |
+| `https_proxy` | HTTPS proxy URL | `http://proxy.example.com:8080` |
+| `proxy_username` | Proxy authentication username (auto-injected into proxy URL with percent-encoding) | - |
+| `proxy_password` | Proxy authentication password (auto percent-encoded and injected into proxy URL) | - |
 
-> `region_id` automatically generates `DMS_MONITORING_BASE_URL` (`https://dws.{region_id}.myhuaweicloud.com`) and `IAM_ENDPOINT` (`https://iam.{region_id}.myhuaweicloud.com`), no manual configuration needed.
+> `region_id` automatically generates `DMS_MONITORING_BASE_URL` (`https://dws.{region_id}.myhuaweicloud.com`), no manual configuration needed.
 
 > You can also specify the config file path via the `DWS_MCP_CONFIG` environment variable.
 
@@ -91,25 +104,15 @@ dws_mcp_token: ""
 After installation, the `dws-mcp-config` CLI tool is available. Run commands from the project root directory (`dws_autopilot_mcp/`):
 
 #### init - Initialize or Update Configuration
-The `init` command sets configuration parameters. Two authentication modes are supported (choose one):
+The `init` command sets configuration parameters:
 
-**Mode 1: IAM Dynamic Token (Recommended)**
 ```bash
-python -m dws_autopilot_mcp.config_cli init --region_id cn-north-7 --username admin --password xxx --domain_name xxx --project_id xxx
+python -m dws_autopilot_mcp.config_cli init --region_id cn-north-7 --ak your_ak --sk your_sk --project_id your_project_id
 ```
-Automatically obtains temporary tokens via IAM username/password. Tokens are auto-renewed without manual maintenance.
 
-**Mode 2: Static Token**
-```bash
-python -m dws_autopilot_mcp.config_cli init --region_id cn-north-7 --token your_token
-```
-Directly use an existing token, suitable when you already have one.
-
-> The only difference between the two modes is the authentication parameters: Mode 1 requires `--username`, `--password`, `--domain_name`, `--project_id`; Mode 2 only requires `--token`. `--region_id` is required for both modes.
+> The `init` command supports partial updates — only specified parameters are updated, unspecified ones remain unchanged. For example, to update only the AK: `python -m dws_autopilot_mcp.config_cli init --ak new_ak`.
 >
-> The `init` command supports partial updates — only specified parameters are updated, unspecified ones remain unchanged. For example, to update only the password: `python -m dws_autopilot_mcp.config_cli init --password new_password`.
->
-> After updating configuration, restart the MCP Server to auto-encrypt sensitive fields (password, token).
+> After updating configuration, restart the MCP Server to auto-encrypt sensitive fields (AK, SK).
 
 #### Other Commands
 
@@ -124,7 +127,7 @@ python -m dws_autopilot_mcp.config_cli show
 python -m dws_autopilot_mcp.config_cli reset
 ```
 
-> The `encrypt`, `show`, and `reset` commands require no additional parameters and are independent of the authentication mode.
+> The `encrypt`, `show`, and `reset` commands require no additional parameters.
 
 ### 3.5 Client Configuration
 Using OpenClaw as an example, add the following to MCP Servers configuration:
@@ -145,7 +148,7 @@ Using OpenClaw as an example, add the following to MCP Servers configuration:
 }
 ```
 
-> Replace `/path/to/python.exe` with your local Python executable path, and `/path/to/dws_autopilot_mcp/src` with the absolute path to this project's `src` directory.
+> Replace `/path/to/python.exe` with your local Python executable path, and `/path/to/dws_autopilot_mcp/src` with the absolute path to this project's `src` directory. On Windows, use `;` as the PYTHONPATH separator; on Linux/macOS, use `:`.
 
 ## 4. Getting Started
 After completing the configuration, you can interact with your DWS cluster using natural language, for example:

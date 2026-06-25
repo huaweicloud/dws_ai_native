@@ -1,8 +1,11 @@
 import ssl
 import logging
 import httpx
-from .config import DMS_MONITORING_BASE_URL, DWS_MCP_TOKEN, HTTP_PROXY, HTTPS_PROXY
-from .token_manager import is_iam_configured, get_token, force_refresh
+from urllib.parse import urlencode
+
+from .apig_sdk import signer
+
+from .config import DMS_MONITORING_BASE_URL, SDK_AK, SDK_SK, PROJECT_ID, HTTP_PROXY, HTTPS_PROXY
 
 _TIMEOUT = 30.0
 
@@ -13,22 +16,39 @@ _ssl_ctx.check_hostname = False
 _ssl_ctx.verify_mode = ssl.CERT_NONE
 _ssl_ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
 
-_DEFAULT_HEADERS: dict[str, str] = {}
-
-
-def _build_headers(**kwargs) -> dict:
-    headers = {**_DEFAULT_HEADERS, **kwargs.pop("headers", {})}
-    return headers
 
 
 def _error_resp(code: int, msg: str) -> dict:
     return {"code": code, "msg": msg, "data": None}
 
 
+def _sign_request(method: str, path: str, params: dict | None = None, body: str = "") -> signer.HttpRequest:
+    query_str = ""
+    if params:
+        sorted_params = sorted(params.items())
+        query_str = "?" + "&".join(f"{k}={v}" for k, v in sorted_params)
+
+    full_url = f"{DMS_MONITORING_BASE_URL}{path}{query_str}"
+
+    r = signer.HttpRequest(method, full_url)
+    r.body = body
+
+    r.headers["Content-Type"] = "application/json"
+    r.headers["X-Language"] = "en-us"
+    if PROJECT_ID:
+        r.headers["X-Project-Id"] = PROJECT_ID
+
+    sig = signer.Signer()
+    sig.Key = SDK_AK
+    sig.Secret = SDK_SK
+    sig.Sign(r)
+
+    return r
+
+
 def _make_client() -> httpx.AsyncClient:
     proxy = HTTPS_PROXY or HTTP_PROXY or None
     return httpx.AsyncClient(
-        base_url=DMS_MONITORING_BASE_URL,
         timeout=_TIMEOUT,
         verify=_ssl_ctx,
         trust_env=False,
@@ -36,27 +56,11 @@ def _make_client() -> httpx.AsyncClient:
     )
 
 
-async def _handle_401_retry(method, path, headers, kwargs) -> httpx.Response | dict | None:
-    if not is_iam_configured():
-        return None
-    logger.warning("401 detected, attempting token refresh...")
-    try:
-        headers["X-Auth-Token"] = await force_refresh()
-    except Exception as e:
-        logger.error("Token refresh failed: %s", e)
-        return _error_resp(-1, f"401 Unauthorized and token refresh failed: {e}")
-    async with _make_client() as client:
-        resp = await client.request(method, path, headers=headers, **kwargs)
-        if resp.status_code == 401:
-            return _error_resp(-1, "401 Unauthorized: Token refresh did not resolve the issue.")
-        return resp
-
-
 async def _handle_error_response(resp, method, path) -> dict | None:
     if resp.status_code == 401:
         return _error_resp(
             -1,
-            "401 Unauthorized: Token missing or expired. Please check DWS_MCP_TOKEN or IAM credentials in MCP client env settings.",
+            "401 Unauthorized: AK/SK signature verification failed. Please check ak and sk in conf/dws_config.yaml.",
         )
     if resp.status_code >= 400:
         body = resp.text
@@ -71,21 +75,19 @@ async def _handle_error_response(resp, method, path) -> dict | None:
 
 
 async def _request(method: str, path: str, **kwargs) -> dict:
-    headers = _build_headers(**kwargs)
-    if is_iam_configured():
-        headers["X-Auth-Token"] = await get_token()
-    elif DWS_MCP_TOKEN:
-        headers["X-Auth-Token"] = DWS_MCP_TOKEN
+    params = kwargs.pop("params", None)
+    body = kwargs.pop("data", "")
+
+    r = _sign_request(method, path, params=params, body=body)
+
+    url = f"{r.scheme}://{r.host}{r.uri}"
+    if r.query:
+        sorted_q = sorted(r.query.items())
+        qs = "&".join(f"{k}={v[0]}" if isinstance(v, list) else f"{k}={v}" for k, v in sorted_q)
+        url = f"{url}?{qs}"
 
     async with _make_client() as client:
-        resp = await client.request(method, path, headers=headers, **kwargs)
-
-        if resp.status_code == 401 and is_iam_configured():
-            retry = await _handle_401_retry(method, path, headers, kwargs)
-            if retry is not None:
-                if isinstance(retry, dict):
-                    return retry
-                resp = retry
+        resp = await client.request(r.method, url, headers=r.headers, **kwargs)
 
         err = await _handle_error_response(resp, method, path)
         if err is not None:
@@ -93,8 +95,12 @@ async def _request(method: str, path: str, **kwargs) -> dict:
         return resp.json()
 
 
+async def get_clusters() -> dict:
+    path = f"/v2/{PROJECT_ID}/clusters"
+    return await _request("GET", path)
+
+
 async def get_host_overview(
-    project_id: str,
     cluster_id: str,
     offset: int = 0,
     limit: int = 512,
@@ -112,7 +118,7 @@ async def get_host_overview(
     sub_order_by: str | None = None,
     rate_type: str | None = None,
 ) -> dict:
-    path = f"/v1.0/{project_id}/dms/host-overview"
+    path = f"/v1.0/{PROJECT_ID}/dms/host-overview"
     params: dict = {
         "cluster_id": cluster_id,
         "offset": offset,
@@ -148,7 +154,6 @@ async def get_host_overview(
 
 
 async def get_metric_data(
-    project_id: str,
     cluster_id: str,
     metric_name: str,
     from_ts: int,
@@ -158,7 +163,7 @@ async def get_metric_data(
     order_by: str | None = None,
     sort_by: str | None = None,
 ) -> dict:
-    path = f"/v1/{project_id}/clusters/{cluster_id}/dms/metrics/{metric_name}"
+    path = f"/v1/{PROJECT_ID}/clusters/{cluster_id}/dms/metrics/{metric_name}"
     params: dict = {
         "from": from_ts,
         "to": to_ts,

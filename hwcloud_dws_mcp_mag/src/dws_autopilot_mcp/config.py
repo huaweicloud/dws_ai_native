@@ -56,9 +56,9 @@ def _save_config(cfg: dict) -> None:
 def _has_plaintext_secrets(cfg: dict) -> bool:
     if cfg.get("encrypt", {}).get("crypter"):
         return False
-    password = cfg.get("iam", {}).get("password", "")
-    token = cfg.get("dws_mcp_token", "")
-    return bool(password) or bool(token)
+    ak = cfg.get("ak", "")
+    sk = cfg.get("sk", "")
+    return bool(ak) or bool(sk)
 
 
 def _auto_encrypt(cfg: dict) -> dict:
@@ -79,18 +79,16 @@ def _auto_encrypt(cfg: dict) -> dict:
     nonce = _generate_nonce()
 
     result = dict(cfg)
-    result.setdefault("iam", {})
 
-    password = result["iam"].get("password", "")
-    if password:
-        result["iam"] = dict(result["iam"])
-        result["iam"]["password"] = encrypt_value(password, master_key, nonce)
-        logger.info("Auto-encrypted iam.password")
+    ak = result.get("ak", "")
+    if ak:
+        result["ak"] = encrypt_value(ak, master_key, nonce)
+        logger.info("Auto-encrypted ak")
 
-    token = result.get("dws_mcp_token", "")
-    if token:
-        result["dws_mcp_token"] = encrypt_value(token, master_key, nonce)
-        logger.info("Auto-encrypted dws_mcp_token")
+    sk = result.get("sk", "")
+    if sk:
+        result["sk"] = encrypt_value(sk, master_key, nonce)
+        logger.info("Auto-encrypted sk")
 
     crypter, crypt_component = encrypt_master_key(master_key)
     nonce_b64 = base64.b64encode(nonce).decode("ascii")
@@ -121,7 +119,11 @@ def _try_decrypt_fields(cfg: dict) -> dict:
     try:
         from .crypto import recover_master_key, decrypt_value, generate_crypt_json_path
 
-        nonce = base64.b64decode(nonce_b64)
+        try:
+            nonce = base64.b64decode(nonce_b64)
+        except Exception as e:
+            logger.warning("Failed to decode nonce (invalid base64): %s", e)
+            return cfg
         config_dir = _find_config_dir()
         crypt_json_path = generate_crypt_json_path(config_dir)
 
@@ -132,20 +134,19 @@ def _try_decrypt_fields(cfg: dict) -> dict:
 
         result = dict(cfg)
 
-        encrypted_password = result.get("iam", {}).get("password", "")
-        if encrypted_password:
+        encrypted_ak = result.get("ak", "")
+        if encrypted_ak:
             try:
-                result["iam"] = dict(result.get("iam", {}))
-                result["iam"]["password"] = decrypt_value(encrypted_password, master_key, nonce)
+                result["ak"] = decrypt_value(encrypted_ak, master_key, nonce)
             except Exception as e:
-                logger.warning("Failed to decrypt iam.password: %s", e)
+                logger.warning("Failed to decrypt ak: %s", e)
 
-        encrypted_token = result.get("dws_mcp_token", "")
-        if encrypted_token:
+        encrypted_sk = result.get("sk", "")
+        if encrypted_sk:
             try:
-                result["dws_mcp_token"] = decrypt_value(encrypted_token, master_key, nonce)
+                result["sk"] = decrypt_value(encrypted_sk, master_key, nonce)
             except Exception as e:
-                logger.warning("Failed to decrypt dws_mcp_token: %s", e)
+                logger.warning("Failed to decrypt sk: %s", e)
 
         return result
     except ImportError:
@@ -196,33 +197,15 @@ if not DMS_MONITORING_BASE_URL:
         "DMS_MONITORING_BASE_URL is not set. Please configure region_id in conf/dws_config.yaml."
     )
 
-DWS_MCP_TOKEN = _cfg.get("dws_mcp_token", "")
+SDK_AK = _cfg.get("ak", "")
+SDK_SK = _cfg.get("sk", "")
+PROJECT_ID = _cfg.get("project_id", "")
 
-if not DWS_MCP_TOKEN:
+if not SDK_AK or not SDK_SK:
     logger.warning(
-        "DWS_MCP_TOKEN is not set. API requests may fail with 401 Unauthorized. "
-        "Please configure it in conf/dws_config.yaml."
+        "AK/SK is not set. API requests may fail with 401 Unauthorized. "
+        "Please configure ak and sk in conf/dws_config.yaml."
     )
-
-IAM_ENDPOINT = f"https://iam.{REGION_ID}.myhuaweicloud.com" if REGION_ID else ""
-IAM_USERNAME = _cfg.get("iam", {}).get("username", "")
-IAM_PASSWORD = _cfg.get("iam", {}).get("password", "")
-IAM_DOMAIN_NAME = _cfg.get("iam", {}).get("domain_name", "")
-IAM_PROJECT_ID = _cfg.get("iam", {}).get("project_id", "")
 
 if HTTP_PROXY or HTTPS_PROXY:
     logger.info("Proxy configured: http_proxy=%s, https_proxy=%s", HTTP_PROXY or "(none)", HTTPS_PROXY or "(none)")
-
-if IAM_ENDPOINT and IAM_USERNAME and IAM_PASSWORD:
-    logger.info(
-        "IAM dynamic token mode configured: endpoint=%s, username=%s",
-        IAM_ENDPOINT,
-        IAM_USERNAME,
-    )
-elif DWS_MCP_TOKEN:
-    logger.info("Using static DWS_MCP_TOKEN mode")
-else:
-    logger.warning(
-        "Neither IAM credentials nor DWS_MCP_TOKEN is configured. "
-        "API requests may fail with 401."
-    )

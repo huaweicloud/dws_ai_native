@@ -39,11 +39,11 @@ def cmd_encrypt(args) -> None:
 
     cfg = _load_yaml(config_path)
 
-    plaintext_password = cfg.get("iam", {}).get("password", "")
-    plaintext_token = cfg.get("dws_mcp_token", "")
+    plaintext_ak = cfg.get("ak", "")
+    plaintext_sk = cfg.get("sk", "")
 
-    if not plaintext_password and not plaintext_token:
-        print("No plaintext password or dws_mcp_token found in dws_config.yaml. Nothing to encrypt.")
+    if not plaintext_ak and not plaintext_sk:
+        print("No plaintext ak or sk found in dws_config.yaml. Nothing to encrypt.")
         return
 
     if cfg.get("encrypt", {}).get("crypter"):
@@ -54,15 +54,14 @@ def cmd_encrypt(args) -> None:
     nonce = _generate_nonce()
 
     enc_cfg = cfg.copy()
-    enc_cfg.setdefault("iam", {})
 
-    if plaintext_password:
-        enc_cfg["iam"]["password"] = encrypt_value(plaintext_password, master_key, nonce)
-        print(f"Encrypted iam.password")
+    if plaintext_ak:
+        enc_cfg["ak"] = encrypt_value(plaintext_ak, master_key, nonce)
+        print("Encrypted ak")
 
-    if plaintext_token:
-        enc_cfg["dws_mcp_token"] = encrypt_value(plaintext_token, master_key, nonce)
-        print(f"Encrypted dws_mcp_token")
+    if plaintext_sk:
+        enc_cfg["sk"] = encrypt_value(plaintext_sk, master_key, nonce)
+        print("Encrypted sk")
 
     crypter, crypt_component = encrypt_master_key(master_key)
     base64 = importlib.import_module("base64")
@@ -105,24 +104,23 @@ def cmd_decrypt(args) -> None:
         sys.exit(1)
 
     enc_cfg = cfg.copy()
-    enc_cfg.setdefault("iam", {})
 
-    encrypted_password = cfg.get("iam", {}).get("password", "")
-    encrypted_token = cfg.get("dws_mcp_token", "")
+    encrypted_ak = cfg.get("ak", "")
+    encrypted_sk = cfg.get("sk", "")
 
-    if encrypted_password:
+    if encrypted_ak:
         try:
-            enc_cfg["iam"]["password"] = decrypt_value(encrypted_password, master_key, nonce)
-            print(f"Decrypted iam.password")
+            enc_cfg["ak"] = decrypt_value(encrypted_ak, master_key, nonce)
+            print("Decrypted ak")
         except Exception as e:
-            print(f"Failed to decrypt iam.password: {e}")
+            print(f"Failed to decrypt ak: {e}")
 
-    if encrypted_token:
+    if encrypted_sk:
         try:
-            enc_cfg["dws_mcp_token"] = decrypt_value(encrypted_token, master_key, nonce)
-            print(f"Decrypted dws_mcp_token")
+            enc_cfg["sk"] = decrypt_value(encrypted_sk, master_key, nonce)
+            print("Decrypted sk")
         except Exception as e:
-            print(f"Failed to decrypt dws_mcp_token: {e}")
+            print(f"Failed to decrypt sk: {e}")
 
     del enc_cfg["encrypt"]
 
@@ -137,8 +135,8 @@ def main() -> None:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("encrypt", help="Encrypt password and token in dws_config.yaml")
-    subparsers.add_parser("decrypt", help="Decrypt password and token in dws_config.yaml")
+    subparsers.add_parser("encrypt", help="Encrypt ak and sk in dws_config.yaml")
+    subparsers.add_parser("decrypt", help="Decrypt ak and sk in dws_config.yaml")
 
     args = parser.parse_args()
 
